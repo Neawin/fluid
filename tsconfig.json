@@ -4,6 +4,10 @@
   "compileOnSave": false,
   "compilerOptions": {
     "strict": true,
+    "paths": {
+      "@app/*": ["src/app/*"]
+    },
+    "baseUrl": ".",
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
