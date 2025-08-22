@@ -1,5 +1,7 @@
-import { Component, ElementRef, inject, ViewChild, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, inject, ViewChild, viewChild } from '@angular/core';
 import { CanvasManager } from '@app/core/services/canvas-manager';
+import { combineLatest, fromEvent, mergeMap, Observable, switchMap, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-fluid-canvas',
@@ -8,9 +10,22 @@ import { CanvasManager } from '@app/core/services/canvas-manager';
   styleUrl: './fluid-canvas.scss',
 })
 export class FluidCanvas {
-  cvs = viewChild<ElementRef>('fluidCanvas');
+  cvs = viewChild<ElementRef<HTMLCanvasElement>>('fluidCanvas');
   cvsManager = inject(CanvasManager);
+  destroyRef = inject(DestroyRef);
   ngAfterViewInit(): void {
-    this.cvsManager.init(this.cvs()?.nativeElement);
+    const canvas = this.cvs()?.nativeElement;
+    if (!canvas) {
+      throw new Error('Canvas not initialized');
+    }
+    this.cvsManager.init(canvas);
+
+    const mousedown$ = fromEvent<MouseEvent>(canvas, 'mousedown').pipe(takeUntilDestroyed(this.destroyRef));
+    const mouseup$ = fromEvent<MouseEvent>(canvas, 'mouseup').pipe(takeUntilDestroyed(this.destroyRef));
+    const mousemove$ = fromEvent<MouseEvent>(canvas, 'mousemove').pipe(takeUntilDestroyed(this.destroyRef));
+
+    mousedown$.pipe(switchMap(() => mousemove$.pipe(takeUntil(mouseup$)))).subscribe((e) => {
+      this.cvsManager.position = e;
+    });
   }
 }

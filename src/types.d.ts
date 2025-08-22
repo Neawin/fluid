@@ -1,4 +1,4 @@
-declare module '*.shader' {
+declare module '*.glsl' {
   const content: string;
   export default content;
 }
