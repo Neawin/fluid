@@ -1,23 +1,18 @@
     #version 300 es
 
 in vec2 a_position;
-
+in vec2 a_texcoord;
+uniform vec2 u_mouse;
 uniform vec2 u_resolution;
+
+out vec2 v_position;
+out vec2 v_mouse_position;
+out vec2 v_texcoord;
 
 void main() {
   gl_Position = vec4(a_position, 0, 1);
-  gl_PointSize = 10.0f;
+  v_position = (a_position * 0.5f) + 0.5f;
 
-  // convert the position from pixels to 0.0 to 1.0
-  vec2 zeroToOne = a_position / u_resolution;
-
-  // convert from 0->1 to 0->2
-  vec2 zeroToTwo = zeroToOne * 2.0f;
-
-  // convert from 0->2 to -1->+1 (clip space)
-  vec2 clipSpace = zeroToTwo - 1.0f;
-
-  clipSpace.y = -clipSpace.y;
-
-  gl_Position = vec4(clipSpace, 0, 1);
+  v_mouse_position = vec2(u_mouse.x, u_resolution.y - u_mouse.y) / u_resolution;
+  v_texcoord = a_texcoord;
 }

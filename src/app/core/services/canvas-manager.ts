@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { createProgram, getWebGLContext, resizeCanvasToDisplaySize } from '@app/core/utils/webglUtils';
 import fragShaderSource from '@app/core/shaders/fragment.glsl';
 import vertShaderSource from '@app/core/shaders/vertex.glsl';
+import { setPosition, setTexcoords } from '@app/core/services/helpers';
 
 @Injectable({
   providedIn: 'root',
@@ -10,11 +11,14 @@ export class CanvasManager {
   private gl!: WebGL2RenderingContext;
   private program: WebGLProgram | null = null;
   private positionBuffer!: WebGLBuffer;
+  private texcoordBuffer!: WebGLBuffer;
+  private colorBuffer!: WebGLBuffer;
   private vao!: WebGLVertexArrayObject;
   private _position = [0, 0];
-  private colorULocation: WebGLUniformLocation | null = null;
-  private resolutionULocation: WebGLUniformLocation | null = null;
+  private resolutionULocation!: WebGLUniformLocation | null;
+  private mouseULocation!: WebGLUniformLocation | null;
   private positionAttrLocation!: number;
+  private texcoordAttrLocation!: number;
 
   constructor() {}
 
@@ -38,16 +42,22 @@ export class CanvasManager {
     gl.useProgram(program);
 
     this.positionAttrLocation = gl.getAttribLocation(program, 'a_position');
-    this.colorULocation = gl.getUniformLocation(program, 'u_color');
+    this.texcoordAttrLocation = gl.getAttribLocation(program, 'a_texcoord');
+    this.mouseULocation = gl.getUniformLocation(program, 'u_mouse');
     this.resolutionULocation = gl.getUniformLocation(program, 'u_resolution');
 
     gl.uniform2f(this.resolutionULocation, canvas.width, canvas.height);
 
-    this.positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-
     const vao = gl.createVertexArray();
     this.vao = vao;
+
+    this.texcoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.texcoordBuffer);
+    setTexcoords(gl);
+
+    this.positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+    setPosition(gl);
 
     this.drawScene();
   }
@@ -59,15 +69,19 @@ export class CanvasManager {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    const bufferData = new Float32Array(this._position);
-    gl.bufferData(gl.ARRAY_BUFFER, bufferData, gl.STATIC_DRAW);
+    gl.uniform2f(this.mouseULocation, this._position[0], this._position[1]);
 
     gl.bindVertexArray(vao);
-    gl.enableVertexAttribArray(this.positionAttrLocation);
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+    gl.enableVertexAttribArray(this.positionAttrLocation);
     gl.vertexAttribPointer(this.positionAttrLocation, 2, gl.FLOAT, false, 0, 0);
 
-    gl.drawArrays(gl.POINTS, 0, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.texcoordAttrLocation);
+    gl.enableVertexAttribArray(this.texcoordAttrLocation);
+    gl.vertexAttribPointer(this.texcoordAttrLocation, 2, gl.FLOAT, false, 0, 0);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
     requestAnimationFrame(() => this.drawScene());
   }
 }
