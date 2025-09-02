@@ -1,87 +1,129 @@
 import { Injectable } from '@angular/core';
 import { createProgram, getWebGLContext, resizeCanvasToDisplaySize } from '@app/core/utils/webglUtils';
-import fragShaderSource from '@app/core/shaders/fragment.glsl';
 import vertShaderSource from '@app/core/shaders/vertex.glsl';
+import splatFrag from '@app/core/shaders/splat-frag.glsl';
+import displayFrag from '@app/core/shaders/display-frag.glsl';
 import { setPosition, setTexcoords } from '@app/core/services/helpers';
 
-@Injectable({
-  providedIn: 'root',
-})
+@Injectable({ providedIn: 'root' })
 export class CanvasManager {
   private gl!: WebGL2RenderingContext;
-  private program: WebGLProgram | null = null;
-  private positionBuffer!: WebGLBuffer;
+
+  private splatProgram!: WebGLProgram;
+  private quadProgram!: WebGLProgram;
+
+  private quadVAO!: WebGLVertexArrayObject;
+  private quadBuffer!: WebGLBuffer;
   private texcoordBuffer!: WebGLBuffer;
-  private colorBuffer!: WebGLBuffer;
-  private vao!: WebGLVertexArrayObject;
-  private _position = [0, 0];
-  private resolutionULocation!: WebGLUniformLocation | null;
-  private mouseULocation!: WebGLUniformLocation | null;
-  private positionAttrLocation!: number;
-  private texcoordAttrLocation!: number;
+  private mouseULocation!: WebGLUniformLocation;
+  private fbo!: WebGLFramebuffer;
+  private tex!: WebGLTexture;
+  private position = {
+    x: 0,
+    y: 0,
+  };
 
   constructor() {}
 
-  set position(e: MouseEvent) {
-    this._position = [e.clientX, e.clientY];
-  }
-
   init(canvas: HTMLCanvasElement) {
     const gl = getWebGLContext(canvas);
-
     this.gl = gl;
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-    gl.viewport(0, 0, canvas.width, canvas.height);
 
-    const program = createProgram(gl, [vertShaderSource, fragShaderSource]);
-    if (!program) {
-      throw new Error('Program initialization failure');
-    }
+    resizeCanvasToDisplaySize(canvas);
 
-    gl.useProgram(program);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
-    this.positionAttrLocation = gl.getAttribLocation(program, 'a_position');
-    this.texcoordAttrLocation = gl.getAttribLocation(program, 'a_texcoord');
-    this.mouseULocation = gl.getUniformLocation(program, 'u_mouse');
-    this.resolutionULocation = gl.getUniformLocation(program, 'u_resolution');
+    this.splatProgram = createProgram(gl, [vertShaderSource, splatFrag])!;
+    this.quadProgram = createProgram(gl, [vertShaderSource, displayFrag])!;
+    this.fbo = gl.createFramebuffer();
 
-    gl.uniform2f(this.resolutionULocation, canvas.width, canvas.height);
+    this.mouseULocation = gl.getUniformLocation(this.splatProgram, 'u_mouse')!;
 
-    const vao = gl.createVertexArray();
-    this.vao = vao;
+    this.createQuadBuffer(gl);
+    this.createTextureCoordsBuffer(gl);
+    this.tex = this.createTexture(gl);
+    this.initFBO();
 
-    this.texcoordBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.texcoordBuffer);
-    setTexcoords(gl);
-
-    this.positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    setPosition(gl);
+    document.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      this.position.x = (e.clientX - rect.left) / rect.width;
+      this.position.y = 1.0 - (e.clientY - rect.top) / rect.height;
+      this.drawSplat(gl);
+    });
 
     this.drawScene();
   }
 
-  drawScene() {
-    const gl = this.gl;
-    const vao = this.vao;
+  initFBO() {
+    this.fbo = this.gl.createFramebuffer()!;
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.fbo);
+    this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.tex, 0);
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+  }
 
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    gl.uniform2f(this.mouseULocation, this._position[0], this._position[1]);
-
-    gl.bindVertexArray(vao);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    gl.enableVertexAttribArray(this.positionAttrLocation);
-    gl.vertexAttribPointer(this.positionAttrLocation, 2, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.texcoordAttrLocation);
-    gl.enableVertexAttribArray(this.texcoordAttrLocation);
-    gl.vertexAttribPointer(this.texcoordAttrLocation, 2, gl.FLOAT, false, 0, 0);
-
+  drawSplat(gl: WebGL2RenderingContext) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.useProgram(this.splatProgram);
+    gl.uniform2f(this.mouseULocation, this.position.x, this.position.y);
+    gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  createQuadBuffer(gl: WebGL2RenderingContext) {
+    this.quadVAO = gl.createVertexArray()!;
+    gl.bindVertexArray(this.quadVAO);
+
+    this.quadBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+    setPosition(gl);
+    const posLoc = gl.getAttribLocation(this.quadProgram, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  createTextureCoordsBuffer(gl: WebGL2RenderingContext) {
+    gl.bindVertexArray(this.quadVAO);
+    this.texcoordBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.texcoordBuffer);
+    setTexcoords(gl);
+    const texLoc = gl.getAttribLocation(this.quadProgram, 'a_texcoord');
+    gl.enableVertexAttribArray(texLoc);
+    gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  createTexture(gl: WebGL2RenderingContext) {
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.width, gl.canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  private drawScene() {
+    const gl = this.gl;
+
+    this.drawSplat(gl);
+
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.useProgram(this.quadProgram);
+
+    // Bind the texture for the display shader:
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    const texLocation = gl.getUniformLocation(this.quadProgram, 'u_texture');
+    gl.uniform1i(texLocation, 0);
+
+    gl.bindVertexArray(this.quadVAO);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
+
     requestAnimationFrame(() => this.drawScene());
   }
 }

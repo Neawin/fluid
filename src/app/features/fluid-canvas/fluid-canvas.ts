@@ -19,13 +19,5 @@ export class FluidCanvas {
       throw new Error('Canvas not initialized');
     }
     this.cvsManager.init(canvas);
-
-    const mousedown$ = fromEvent<MouseEvent>(canvas, 'mousedown').pipe(takeUntilDestroyed(this.destroyRef));
-    const mouseup$ = fromEvent<MouseEvent>(canvas, 'mouseup').pipe(takeUntilDestroyed(this.destroyRef));
-    const mousemove$ = fromEvent<MouseEvent>(canvas, 'mousemove').pipe(takeUntilDestroyed(this.destroyRef));
-
-    mousedown$.pipe(switchMap(() => mousemove$.pipe(takeUntil(mouseup$)))).subscribe((e) => {
-      this.cvsManager.position = e;
-    });
   }
 }
