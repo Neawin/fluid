@@ -346,8 +346,10 @@ export class CanvasManager {
 
   private multipleSplats(amount: number) {
     for (let i = 0; i < amount; i++) {
-      // Use white here, so subtraction makes it darker on white background
-      const color = { r: 1.0, g: 1.0, b: 1.0 };
+      const color = generateColor();
+      color.r *= 10.0;
+      color.g *= 10.0;
+      color.b *= 10.0;
       const x = Math.random();
       const y = Math.random();
       const dx = 1000 * (Math.random() - 0.5);
