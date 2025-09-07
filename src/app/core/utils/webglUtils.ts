@@ -1,52 +1,85 @@
-export function createShader(gl: WebGL2RenderingContext, type: GLenum, source: string) {
-  const shader = gl.createShader(type);
-  if (!shader) {
-    throw new Error('Error creating shader');
-  }
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-  if (success) {
-    return shader;
-  }
-
-  gl.deleteShader(shader);
-  return null;
+export interface WebGLTextureFormat {
+  internalFormat: number;
+  format: number;
+  type: number;
 }
 
-export function getWebGLContext(canvas: HTMLCanvasElement) {
-  let gl = canvas.getContext('webgl2', { alpha: true });
+export interface WebGLContextInfo {
+  gl: WebGL2RenderingContext;
+  ext: {
+    formatRGBA: WebGLTextureFormat | null;
+    formatRG: WebGLTextureFormat | null;
+    formatR: WebGLTextureFormat | null;
+    halfFloatTexType: number;
+    supportLinearFiltering: any;
+  };
+}
+
+export function getWebGLContext(canvas: HTMLCanvasElement): WebGLContextInfo {
+  const params: WebGLContextAttributes = {
+    alpha: true,
+    depth: false,
+    stencil: false,
+    antialias: false,
+    preserveDrawingBuffer: false,
+  };
+
+  const gl = canvas.getContext('webgl2', params) as WebGL2RenderingContext | null;
+
   if (!gl) {
-    throw new Error("Browser doesn't support webgl2");
+    throw new Error('WebGL2 is not supported in this browser.');
   }
 
-  gl.clearColor(0, 0, 0, 0);
+  gl.clearColor(0.0, 0.0, 0.0, 1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  return gl;
+  // WebGL2 extensions
+  gl.getExtension('EXT_color_buffer_float');
+  const supportLinearFiltering = gl.getExtension('OES_texture_float_linear');
+
+  const halfFloatTexType = gl.HALF_FLOAT;
+
+  const formatRGBA = getSupportedFormat(gl, gl.RGBA16F, gl.RGBA, halfFloatTexType);
+  const formatRG = getSupportedFormat(gl, gl.RG16F, gl.RG, halfFloatTexType);
+  const formatR = getSupportedFormat(gl, gl.R16F, gl.RED, halfFloatTexType);
+
+  return {
+    gl,
+    ext: {
+      formatRGBA,
+      formatRG,
+      formatR,
+      halfFloatTexType,
+      supportLinearFiltering,
+    },
+  };
 }
 
-export function createProgram(gl: WebGL2RenderingContext, shaderSrc: string[]) {
-  const program = gl.createProgram();
+function getSupportedFormat(
+  gl: WebGL2RenderingContext,
+  internalFormat: number,
+  format: number,
+  type: number
+): WebGLTextureFormat | null {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-  const vertShader = createShader(gl, gl.VERTEX_SHADER, shaderSrc[0]);
-  const fragShader = createShader(gl, gl.FRAGMENT_SHADER, shaderSrc[1]);
-
-  if (!vertShader || !fragShader) {
-    throw new Error('Shader compilation failed');
+  try {
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, format, type, null);
+    const err = gl.getError();
+    if (err !== gl.NO_ERROR) {
+      return null;
+    }
+    return { internalFormat, format, type };
+  } catch (e) {
+    return null;
+  } finally {
+    gl.deleteTexture(texture);
   }
-
-  gl.attachShader(program, vertShader);
-  gl.attachShader(program, fragShader);
-  gl.linkProgram(program);
-  const success = gl.getProgramParameter(program, gl.LINK_STATUS);
-
-  if (success) {
-    return program;
-  }
-
-  gl.deleteProgram(program);
-  return null;
 }
 
 export function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement, multiplier = 1): boolean {
