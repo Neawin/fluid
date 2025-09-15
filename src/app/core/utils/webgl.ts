@@ -1,3 +1,5 @@
+import { scaleByPixelRatio } from '@app/core/services/helpers';
+
 export interface WebGLTextureFormat {
   internalFormat: number;
   format: number;
@@ -53,6 +55,17 @@ export function getWebGLContext(canvas: HTMLCanvasElement): WebGLContextInfo {
       supportLinearFiltering,
     },
   };
+}
+
+export function resizeCanvas(canvas: HTMLCanvasElement) {
+  let width = scaleByPixelRatio(canvas.clientWidth);
+  let height = scaleByPixelRatio(canvas.clientHeight);
+  if (canvas.width != width || canvas.height != height) {
+    canvas.width = width;
+    canvas.height = height;
+    return true;
+  }
+  return false;
 }
 
 function getSupportedFormat(

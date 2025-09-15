@@ -139,11 +139,12 @@ export function correctDeltaY(gl: WebGL2RenderingContext, delta: number) {
 }
 
 export function generateColor() {
-  let c = HSVtoRGB(Math.random(), 1.0, 1.0);
-  c.r *= 0.15;
-  c.g *= 0.15;
-  c.b *= 0.15;
-  return c;
+  return { r: 1, g: 1, b: 1 };
+  // let c = HSVtoRGB(Math.random(), 1.0, 1.0);
+  // c.r *= 0.15;
+  // c.g *= 0.15;
+  // c.b *= 0.15;
+  // return c;
 }
 
 export function HSVtoRGB(h: any, s: any, v: any) {

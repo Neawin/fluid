@@ -1,8 +1,6 @@
 import { Injectable } from '@angular/core';
-import { getWebGLContext, resizeCanvasToDisplaySize } from '@app/core/utils/webglUtils';
 import {
   calcDeltaTime,
-  clamp01,
   compileShader,
   createBlit,
   createTextureAsync,
@@ -11,6 +9,7 @@ import {
   Material,
   normalizeColor,
   scaleByPixelRatio,
+  updatePointerUpData,
   wrap,
 } from '@app/core/services/helpers';
 import baseVertexSource from '@app/core/shaders/base-vertex.glsl';
@@ -31,6 +30,9 @@ import gradientSubtractSource from '@app/core/shaders/gradient-subtract.glsl';
 import { Program } from '@app/core/models/Program';
 import { config } from '@app/core/services/config';
 import { Pointer } from '@app/core/models/Pointer';
+import { updatePointerDownData, updatePointerMoveData } from '@app/core/utils/pointer';
+import { getWebGLContext, resizeCanvas, resizeCanvasToDisplaySize } from '@app/core/utils/webgl';
+import * as dat from 'dat.gui';
 
 @Injectable({ providedIn: 'root' })
 export class CanvasManager {
@@ -97,6 +99,8 @@ export class CanvasManager {
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.getExtension('EXT_color_buffer_float');
 
+    this.initGUI();
+
     this.blit = createBlit(gl);
 
     this.ditheringTexture = createTextureAsync(this.gl, 'LDR_LLL1_0.png');
@@ -117,7 +121,7 @@ export class CanvasManager {
       let posY = scaleByPixelRatio(e.offsetY);
       let pointer = this.pointers.find((p) => p.id == -1);
       if (pointer == null) pointer = new Pointer();
-      this.updatePointerDownData(pointer, -1, posX, posY);
+      updatePointerDownData(this.gl, pointer, -1, posX, posY);
     });
 
     canvas.addEventListener('mousemove', (e) => {
@@ -126,12 +130,30 @@ export class CanvasManager {
       let posX = scaleByPixelRatio(e.offsetX);
       let posY = scaleByPixelRatio(e.offsetY);
 
-      this.updatePointerMoveData(pointer, posX, posY);
+      updatePointerMoveData(gl, pointer, posX, posY);
     });
 
     window.addEventListener('mouseup', () => {
-      this.updatePointerUpData(this.pointers[0]);
+      updatePointerUpData(this.pointers[0]);
     });
+  }
+
+  initGUI() {
+    let gui = new dat.GUI({ width: 300 });
+    gui
+      .add(config, 'DYE_RESOLUTION', { high: 1024, medium: 512, low: 256, 'very low': 128 })
+      .name('quality')
+      .onFinishChange(this.initFramebuffers);
+    gui
+      .add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 })
+      .name('sim resolution')
+      .onFinishChange(this.initFramebuffers);
+    gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
+    gui.add(config, 'VELOCITY_DISSIPATION', 0, 4.0).name('velocity diffusion');
+    gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
+    gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
+    gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
+    gui.add(config, 'PAUSED').name('paused').listen();
   }
 
   initShaders() {
@@ -164,15 +186,6 @@ export class CanvasManager {
     this.vorticityProgram = new Program(this.gl, this.baseVertexShader, this.vorticityShader);
     this.pressureProgram = new Program(this.gl, this.baseVertexShader, this.pressureShader);
     this.gradientSubtractProgram = new Program(this.gl, this.baseVertexShader, this.gradientSubtractShader);
-  }
-
-  private framebufferToTexture(target: any) {
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
-    let length = target.width * target.height * 4;
-    let texture = new Float32Array(length);
-    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, texture);
-    return texture;
   }
 
   private updateKeywords() {
@@ -350,6 +363,7 @@ export class CanvasManager {
       color.r *= 10.0;
       color.g *= 10.0;
       color.b *= 10.0;
+
       const x = Math.random();
       const y = Math.random();
       const dx = 1000 * (Math.random() - 0.5);
@@ -382,29 +396,15 @@ export class CanvasManager {
     this.blit(this.velocity.write);
     this.velocity.swap();
 
-    // --- 2. Dye splat ---
     gl.uniform1i(this.splatProgram.uniforms.get('uTarget'), this.dye.read.attach(0));
     gl.uniform1f(this.splatProgram.uniforms.get('aspectRatio'), aspectRatio);
     gl.uniform2f(this.splatProgram.uniforms.get('point'), x, y);
     gl.uniform1f(this.splatProgram.uniforms.get('radius'), radius);
 
-    // Black splat color
     gl.uniform3f(this.splatProgram.uniforms.get('color'), color.r, color.g, color.b);
 
     this.blit(this.dye.write);
     this.dye.swap();
-  }
-
-  private resizeCanvas() {
-    const canvas = <HTMLCanvasElement>this.gl.canvas;
-    let width = scaleByPixelRatio(canvas.clientWidth);
-    let height = scaleByPixelRatio(canvas.clientHeight);
-    if (canvas.width != width || canvas.height != height) {
-      canvas.width = width;
-      canvas.height = height;
-      return true;
-    }
-    return false;
   }
 
   private updateColors(dt: number) {
@@ -573,49 +573,12 @@ export class CanvasManager {
     this.drawDisplay(target);
   }
 
-  private updatePointerDownData(pointer: Pointer, id: number, posX: number, posY: number) {
-    pointer.id = id;
-    pointer.down = true;
-    pointer.moved = false;
-    pointer.texcoordX = posX / this.gl.canvas.width;
-    pointer.texcoordY = 1.0 - posY / this.gl.canvas.height;
-    pointer.prevTexcoordX = pointer.texcoordX;
-    pointer.prevTexcoordY = pointer.texcoordY;
-    pointer.deltaX = 0;
-    pointer.deltaY = 0;
-    pointer.color = generateColor();
-  }
-
-  private updatePointerMoveData(pointer: Pointer, posX: number, posY: number) {
-    pointer.prevTexcoordX = pointer.texcoordX;
-    pointer.prevTexcoordY = pointer.texcoordY;
-    pointer.texcoordX = posX / this.gl.canvas.width;
-    pointer.texcoordY = 1.0 - posY / this.gl.canvas.height;
-    pointer.deltaX = this.correctDeltaX(pointer.texcoordX - pointer.prevTexcoordX);
-    pointer.deltaY = this.correctDeltaY(pointer.texcoordY - pointer.prevTexcoordY);
-    pointer.moved = Math.abs(pointer.deltaX) > 0 || Math.abs(pointer.deltaY) > 0;
-  }
-
-  private correctDeltaX(delta: number) {
-    let aspectRatio = this.gl.canvas.width / this.gl.canvas.height;
-    if (aspectRatio < 1) delta *= aspectRatio;
-    return delta;
-  }
-
-  private correctDeltaY(delta: number) {
-    let aspectRatio = this.gl.canvas.width / this.gl.canvas.height;
-    if (aspectRatio > 1) delta /= aspectRatio;
-    return delta;
-  }
-
-  private updatePointerUpData(pointer: Pointer) {
-    pointer.down = false;
-  }
-
   private drawScene() {
     const { dt, now } = calcDeltaTime(this.lastUpdateTime);
     this.lastUpdateTime = now;
-    if (this.resizeCanvas()) {
+    const canvas = <HTMLCanvasElement>this.gl.canvas;
+    const needsResize = resizeCanvas(canvas);
+    if (needsResize) {
       this.initFramebuffers();
     }
     this.updateColors(dt);
