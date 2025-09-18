@@ -115,18 +115,15 @@ export class CanvasManager {
     this.updateKeywords();
     this.initFramebuffers();
     this.drawTextToDye('Alicja Łata');
-
     this.lastUpdateTime = Date.now();
 
     this.drawScene();
+  }
 
-    window.addEventListener('scroll', (event) => {
-      if (scrollY > 200 && !this.fired) {
-        this.moveText(this.textCanvas);
-        this.fired = true;
-        this.config.PAUSED = false;
-      }
-    });
+  public onScroll() {
+    this.moveText(this.textCanvas);
+    this.fired = true;
+    this.config.PAUSED = false;
   }
 
   initGUI() {
@@ -198,7 +195,12 @@ export class CanvasManager {
           if (Math.random() < 0.01) {
             const u = x / canvas.width;
             const v = 1.0 - y / canvas.height;
-            this.splat(u, v, 0, -400, { r: 1, g: 1, b: 1 });
+
+            const dx = (Math.random() - 0.5) * 2000;
+            const dy = 800 + Math.random() * 800;
+
+            const color = generateColor();
+            this.splat(u, v, dx, dy, color);
           }
         }
       }
@@ -334,7 +336,6 @@ export class CanvasManager {
     const aspectRatio = gl.canvas.width / gl.canvas.height;
     const radius = this.correctRadius(this.config.SPLAT_RADIUS / 100.0);
 
-    // --- 1. Velocity splat ---
     gl.uniform1i(this.splatProgram.uniforms.get('uTarget'), this.velocity.read.attach(0));
     gl.uniform1f(this.splatProgram.uniforms.get('aspectRatio'), aspectRatio);
     gl.uniform2f(this.splatProgram.uniforms.get('point'), x, y);

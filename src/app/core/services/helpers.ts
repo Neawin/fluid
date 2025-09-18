@@ -38,11 +38,7 @@ export class Material {
   programs: WebGLProgram[] = [];
   activeProgram: WebGLProgram | null = null;
   uniforms: Map<string, WebGLUniformLocation | null> = new Map();
-  constructor(
-    private gl: WebGL2RenderingContext,
-    private vertexShader: WebGLShader,
-    private fragmentShaderSource: string
-  ) {}
+  constructor(private gl: WebGL2RenderingContext, private vertexShader: WebGLShader, private fragmentShaderSource: string) {}
 
   setKeywords(keywords: string[]) {
     let hash = 0;
@@ -141,9 +137,9 @@ export function correctDeltaY(gl: WebGL2RenderingContext, delta: number) {
 export function generateColor() {
   return { r: 1, g: 1, b: 1 };
   // let c = HSVtoRGB(Math.random(), 1.0, 1.0);
-  // c.r *= 0.15;
-  // c.g *= 0.15;
-  // c.b *= 0.15;
+  // c.r *= 0.8;
+  // c.g *= 0.8;
+  // c.b *= 0.8;
   // return c;
 }
 

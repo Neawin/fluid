@@ -1,27 +1,26 @@
-import { Component, DestroyRef, ElementRef, inject, ViewChild, viewChild } from '@angular/core';
+import { Component, ElementRef, inject, viewChild } from '@angular/core';
 import { CanvasManager } from '@app/core/services/canvas-manager';
-import { combineLatest, fromEvent, mergeMap, Observable, switchMap, takeUntil } from 'rxjs';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FluidBackground } from '@app/features/fluid-canvas/components/fluid-background/fluid-background';
 
 @Component({
   selector: 'app-fluid-canvas',
-  imports: [],
+  imports: [FluidBackground],
   templateUrl: './fluid-canvas.html',
   styleUrl: './fluid-canvas.scss',
 })
 export class FluidCanvas {
   cvs = viewChild<ElementRef<HTMLCanvasElement>>('fluidCanvas');
-  cvsManager = inject(CanvasManager);
-  destroyRef = inject(DestroyRef);
+  private readonly cvsManager = inject(CanvasManager);
+
   ngAfterViewInit(): void {
+    this.initCanvas();
+  }
+
+  initCanvas() {
     const canvas = this.cvs()?.nativeElement;
     if (!canvas) {
       throw new Error('Canvas not initialized');
     }
     this.cvsManager.init(canvas);
-  }
-
-  restart() {
-    this.cvsManager.restart('ALICJA ŁATA');
   }
 }

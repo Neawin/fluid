@@ -36,6 +36,6 @@ export const config: Config = {
   PAUSED: true,
   BACK_COLOR: { r: 0, g: 0, b: 0 },
   TRANSPARENT: false,
-  BLOOM: false,
-  SUNRAYS: false,
+  BLOOM: true,
+  SUNRAYS: true,
 };
