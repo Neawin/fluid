@@ -33,6 +33,7 @@ import { Pointer } from '@app/core/models/Pointer';
 import { updatePointerDownData, updatePointerMoveData } from '@app/core/utils/pointer';
 import { getWebGLContext, resizeCanvas, resizeCanvasToDisplaySize } from '@app/core/utils/webgl';
 import * as dat from 'dat.gui';
+import { Config } from '@app/core/services/config';
 
 @Injectable({ providedIn: 'root' })
 export class CanvasManager {
@@ -86,6 +87,9 @@ export class CanvasManager {
   private colorUpdateTimer: number = 0.0;
   private pointers: Pointer[] = [];
   private splatStack: number[] = [];
+  private config: Config = config;
+  private textCanvas!: HTMLCanvasElement;
+  private fired = false;
 
   constructor() {}
 
@@ -99,7 +103,7 @@ export class CanvasManager {
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.getExtension('EXT_color_buffer_float');
 
-    this.initGUI();
+    // this.initGUI();
 
     this.blit = createBlit(gl);
 
@@ -110,96 +114,105 @@ export class CanvasManager {
 
     this.updateKeywords();
     this.initFramebuffers();
-    this.multipleSplats(Math.floor(Math.random() * 20) + 5);
+    this.drawTextToDye('Alicja Łata');
 
     this.lastUpdateTime = Date.now();
 
     this.drawScene();
 
-    canvas.addEventListener('mousedown', (e) => {
-      let posX = scaleByPixelRatio(e.offsetX);
-      let posY = scaleByPixelRatio(e.offsetY);
-      let pointer = this.pointers.find((p) => p.id == -1);
-      if (pointer == null) pointer = new Pointer();
-      updatePointerDownData(this.gl, pointer, -1, posX, posY);
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-      let pointer = this.pointers[0];
-      if (!pointer.down) return;
-      let posX = scaleByPixelRatio(e.offsetX);
-      let posY = scaleByPixelRatio(e.offsetY);
-
-      updatePointerMoveData(gl, pointer, posX, posY);
-    });
-
-    window.addEventListener('mouseup', () => {
-      updatePointerUpData(this.pointers[0]);
+    window.addEventListener('scroll', (event) => {
+      if (scrollY > 200 && !this.fired) {
+        this.moveText(this.textCanvas);
+        this.fired = true;
+        this.config.PAUSED = false;
+      }
     });
   }
 
   initGUI() {
     let gui = new dat.GUI({ width: 300 });
-    gui
-      .add(config, 'DYE_RESOLUTION', { high: 1024, medium: 512, low: 256, 'very low': 128 })
-      .name('quality')
-      .onFinishChange(this.initFramebuffers);
-    gui
-      .add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 })
-      .name('sim resolution')
-      .onFinishChange(this.initFramebuffers);
-    gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
-    gui.add(config, 'VELOCITY_DISSIPATION', 0, 4.0).name('velocity diffusion');
-    gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
-    gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
-    gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
-    gui.add(config, 'PAUSED').name('paused').listen();
+    gui.add(this.config, 'DYE_RESOLUTION', { high: 1024, medium: 512, low: 256, 'very low': 128 }).name('quality').onFinishChange(this.initFramebuffers);
+    gui.add(this.config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(this.initFramebuffers);
+    gui.add(this.config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
+    gui.add(this.config, 'VELOCITY_DISSIPATION', 0, 4.0).name('velocity diffusion');
+    gui.add(this.config, 'PRESSURE', 0.0, 1.0).name('pressure');
+    gui.add(this.config, 'CURL', 0, 50).name('vorticity').step(1);
+    gui.add(this.config, 'SPLAT_RADIUS', 0.01, 0.5).name('splat radius');
+    gui.add(this.config, 'PAUSED').name('paused').listen();
   }
 
-  initShaders() {
-    this.baseVertexShader = compileShader(this.gl, this.gl.VERTEX_SHADER, baseVertexSource);
-    this.blurVertexShader = compileShader(this.gl, this.gl.VERTEX_SHADER, blurVertexSource);
-    this.blurShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, blurSource);
-    this.copyShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, copySource);
-    this.clearShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, clearSource);
-    this.colorShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, colorSource);
-    this.checkerboardShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, checkerboardSource);
-    this.splatShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, splatSource);
-    this.advectionShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, advectionSource);
-    this.divergenceShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, divergenceSource);
-    this.curlShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, curlSource);
-    this.vorticityShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, vorticitySource);
-    this.pressureShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, pressureSource);
-    this.gradientSubtractShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, gradientSubtractSource);
+  public restart(text: string) {
+    this.drawTextToDye(text);
+    this.moveText(this.textCanvas);
   }
 
-  initPrograms() {
-    this.blurProgram = new Program(this.gl, this.blurVertexShader, this.blurShader);
-    this.copyProgram = new Program(this.gl, this.baseVertexShader, this.copyShader);
-    this.clearProgram = new Program(this.gl, this.baseVertexShader, this.clearShader);
-    this.colorProgram = new Program(this.gl, this.baseVertexShader, this.colorShader);
-    this.checkerboardProgram = new Program(this.gl, this.baseVertexShader, this.checkerboardShader);
-    this.splatProgram = new Program(this.gl, this.baseVertexShader, this.splatShader);
-    this.advectionProgram = new Program(this.gl, this.baseVertexShader, this.advectionShader);
-    this.divergenceProgram = new Program(this.gl, this.baseVertexShader, this.divergenceShader);
-    this.curlProgram = new Program(this.gl, this.baseVertexShader, this.curlShader);
-    this.vorticityProgram = new Program(this.gl, this.baseVertexShader, this.vorticityShader);
-    this.pressureProgram = new Program(this.gl, this.baseVertexShader, this.pressureShader);
-    this.gradientSubtractProgram = new Program(this.gl, this.baseVertexShader, this.gradientSubtractShader);
+  private drawTextToDye(text: string) {
+    const gl = this.gl;
+
+    const textCanvas = document.createElement('canvas');
+    this.textCanvas = textCanvas;
+    textCanvas.width = this.dye.width;
+    textCanvas.height = this.dye.height;
+    const ctx = textCanvas.getContext('2d')!;
+    ctx.fillRect(0, 0, textCanvas.width, textCanvas.height);
+    ctx.fillStyle = 'white';
+    ctx.font = 'normal 200px masqualero-stencil';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, textCanvas.width / 2, textCanvas.height / 2);
+
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textCanvas);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
+    this.copyProgram.bind();
+    gl.uniform1i(this.copyProgram.uniforms.get('uTexture'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    this.blit(this.dye.write);
+    this.dye.swap();
+
+    gl.deleteTexture(tex);
   }
 
-  private updateKeywords() {
-    let displayKeywords = [];
-    if (config.SHADING) displayKeywords.push('SHADING');
-    if (config.BLOOM) displayKeywords.push('BLOOM');
-    if (config.SUNRAYS) displayKeywords.push('SUNRAYS');
-    this.displayMaterial.setKeywords(displayKeywords);
+  private moveText(canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const index = (y * canvas.width + x) * 4;
+        const r = pixels[index];
+        const g = pixels[index + 1];
+        const b = pixels[index + 2];
+        const a = pixels[index + 3];
+
+        if (r === 255 && g === 255 && b === 255 && a === 255) {
+          if (Math.random() < 0.01) {
+            const u = x / canvas.width;
+            const v = 1.0 - y / canvas.height;
+            this.splat(u, v, 0, -400, { r: 1, g: 1, b: 1 });
+          }
+        }
+      }
+    }
+
+    setTimeout(() => {
+      this.config.DENSITY_DISSIPATION = 1;
+    }, 2500);
   }
 
   private initFramebuffers() {
     const gl = this.gl;
-    let simRes = getResolution(gl, config.SIM_RESOLUTION);
-    let dyeRes = getResolution(gl, config.DYE_RESOLUTION);
+    let simRes = getResolution(gl, this.config.SIM_RESOLUTION);
+    let dyeRes = getResolution(gl, this.config.DYE_RESOLUTION);
 
     const texType = this.ext.halfFloatTexType;
     const rgba = this.ext.formatRGBA;
@@ -209,45 +222,11 @@ export class CanvasManager {
 
     gl.disable(gl.BLEND);
 
-    if (this.dye == null)
-      this.dye = this.createDoubleFBO(
-        dyeRes.width,
-        dyeRes.height,
-        rgba.internalFormat,
-        rgba.format,
-        texType,
-        filtering
-      );
-    else
-      this.dye = this.resizeDoubleFBO(
-        this.dye,
-        dyeRes.width,
-        dyeRes.height,
-        rgba.internalFormat,
-        rgba.format,
-        texType,
-        filtering
-      );
+    if (this.dye == null) this.dye = this.createDoubleFBO(dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
+    else this.dye = this.resizeDoubleFBO(this.dye, dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
 
-    if (this.velocity == null)
-      this.velocity = this.createDoubleFBO(
-        simRes.width,
-        simRes.height,
-        rg.internalFormat,
-        rg.format,
-        texType,
-        filtering
-      );
-    else
-      this.velocity = this.resizeDoubleFBO(
-        this.velocity,
-        simRes.width,
-        simRes.height,
-        rg.internalFormat,
-        rg.format,
-        texType,
-        filtering
-      );
+    if (this.velocity == null) this.velocity = this.createDoubleFBO(simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
+    else this.velocity = this.resizeDoubleFBO(this.velocity, simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
 
     this.divergence = this.createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
     this.curl = this.createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
@@ -318,15 +297,7 @@ export class CanvasManager {
     };
   }
 
-  private resizeFBO(
-    target: ReturnType<CanvasManager['createFBO']>,
-    w: number,
-    h: number,
-    internalFormat: number,
-    format: number,
-    type: number,
-    param: number
-  ) {
+  private resizeFBO(target: ReturnType<CanvasManager['createFBO']>, w: number, h: number, internalFormat: number, format: number, type: number, param: number) {
     const gl = this.gl;
     const copyProgram = this.copyProgram;
     const blit = createBlit(gl);
@@ -338,15 +309,7 @@ export class CanvasManager {
     return newFBO;
   }
 
-  private resizeDoubleFBO(
-    target: any,
-    w: number,
-    h: number,
-    internalFormat: number,
-    format: number,
-    type: number,
-    param: number
-  ) {
+  private resizeDoubleFBO(target: any, w: number, h: number, internalFormat: number, format: number, type: number, param: number) {
     if (target.width === w && target.height === h) return target;
     target.read = this.resizeFBO(target.read, w, h, internalFormat, format, type, param);
     target.write = this.createFBO(w, h, internalFormat, format, type, param);
@@ -355,21 +318,6 @@ export class CanvasManager {
     target.texelSizeX = 1.0 / w;
     target.texelSizeY = 1.0 / h;
     return target;
-  }
-
-  private multipleSplats(amount: number) {
-    for (let i = 0; i < amount; i++) {
-      const color = generateColor();
-      color.r *= 10.0;
-      color.g *= 10.0;
-      color.b *= 10.0;
-
-      const x = Math.random();
-      const y = Math.random();
-      const dx = 1000 * (Math.random() - 0.5);
-      const dy = 1000 * (Math.random() - 0.5);
-      this.splat(x, y, dx, dy, color);
-    }
   }
 
   private correctRadius(radius: number) {
@@ -384,7 +332,7 @@ export class CanvasManager {
     this.splatProgram.bind();
 
     const aspectRatio = gl.canvas.width / gl.canvas.height;
-    const radius = this.correctRadius(config.SPLAT_RADIUS / 100.0);
+    const radius = this.correctRadius(this.config.SPLAT_RADIUS / 100.0);
 
     // --- 1. Velocity splat ---
     gl.uniform1i(this.splatProgram.uniforms.get('uTarget'), this.velocity.read.attach(0));
@@ -408,9 +356,9 @@ export class CanvasManager {
   }
 
   private updateColors(dt: number) {
-    if (!config.COLORFUL) return;
+    if (!this.config.COLORFUL) return;
 
-    this.colorUpdateTimer += dt * config.COLOR_UPDATE_SPEED;
+    this.colorUpdateTimer += dt * this.config.COLOR_UPDATE_SPEED;
     if (this.colorUpdateTimer >= 1) {
       this.colorUpdateTimer = wrap(this.colorUpdateTimer, 0, 1);
       this.pointers.forEach((p) => {
@@ -421,7 +369,7 @@ export class CanvasManager {
 
   private applyInputs() {
     if (this.splatStack.length > 0) {
-      this.multipleSplats(this.splatStack.pop()!);
+      // this.multipleSplats(this.splatStack.pop()!);
     }
 
     this.pointers.forEach((p) => {
@@ -433,8 +381,8 @@ export class CanvasManager {
   }
 
   private splatPointer(pointer: Pointer) {
-    let dx = pointer.deltaX * config.SPLAT_FORCE;
-    let dy = pointer.deltaY * config.SPLAT_FORCE;
+    let dx = pointer.deltaX * this.config.SPLAT_FORCE;
+    let dy = pointer.deltaY * this.config.SPLAT_FORCE;
     this.splat(pointer.texcoordX, pointer.texcoordY, dx, dy, pointer.color);
   }
 
@@ -464,7 +412,7 @@ export class CanvasManager {
     gl.uniform2f(vorticityProgram.uniforms.get('texelSize'), velocity.texelSizeX, velocity.texelSizeY);
     gl.uniform1i(vorticityProgram.uniforms.get('uVelocity'), velocity.read.attach(0));
     gl.uniform1i(vorticityProgram.uniforms.get('uCurl'), this.curl.attach(1));
-    gl.uniform1f(vorticityProgram.uniforms.get('curl'), config.CURL);
+    gl.uniform1f(vorticityProgram.uniforms.get('curl'), this.config.CURL);
     gl.uniform1f(vorticityProgram.uniforms.get('dt'), dt);
     this.blit(velocity.write);
     velocity.swap();
@@ -476,14 +424,14 @@ export class CanvasManager {
 
     clearProgram.bind();
     gl.uniform1i(clearProgram.uniforms.get('uTexture'), this.pressure.read.attach(0));
-    gl.uniform1f(clearProgram.uniforms.get('value'), config.PRESSURE);
+    gl.uniform1f(clearProgram.uniforms.get('value'), this.config.PRESSURE);
     this.blit(this.pressure.write);
     this.pressure.swap();
 
     pressureProgram.bind();
     gl.uniform2f(pressureProgram.uniforms.get('texelSize'), velocity.texelSizeX, velocity.texelSizeY);
     gl.uniform1i(pressureProgram.uniforms.get('uDivergence'), divergence.attach(0));
-    for (let i = 0; i < config.PRESSURE_ITERATIONS; i++) {
+    for (let i = 0; i < this.config.PRESSURE_ITERATIONS; i++) {
       gl.uniform1i(pressureProgram.uniforms.get('uPressure'), pressure.read.attach(1));
       blit(pressure.write);
       pressure.swap();
@@ -498,37 +446,32 @@ export class CanvasManager {
 
     advectionProgram.bind();
     gl.uniform2f(advectionProgram.uniforms.get('texelSize'), velocity.texelSizeX, velocity.texelSizeY);
-    if (!this.ext.supportLinearFiltering)
-      gl.uniform2f(advectionProgram.uniforms.get('dyeTexelSize'), velocity.texelSizeX, velocity.texelSizeY);
+    if (!this.ext.supportLinearFiltering) gl.uniform2f(advectionProgram.uniforms.get('dyeTexelSize'), velocity.texelSizeX, velocity.texelSizeY);
     let velocityId = velocity.read.attach(0);
     gl.uniform1i(advectionProgram.uniforms.get('uVelocity'), velocityId);
     gl.uniform1i(advectionProgram.uniforms.get('uSource'), velocityId);
     gl.uniform1f(advectionProgram.uniforms.get('dt'), dt);
-    gl.uniform1f(advectionProgram.uniforms.get('dissipation'), config.VELOCITY_DISSIPATION);
+    gl.uniform1f(advectionProgram.uniforms.get('dissipation'), this.config.VELOCITY_DISSIPATION);
     blit(velocity.write);
     velocity.swap();
 
-    if (!this.ext.supportLinearFiltering)
-      gl.uniform2f(advectionProgram.uniforms.get('dyeTexelSize'), dye.texelSizeX, dye.texelSizeY);
+    if (!this.ext.supportLinearFiltering) gl.uniform2f(advectionProgram.uniforms.get('dyeTexelSize'), dye.texelSizeX, dye.texelSizeY);
     gl.uniform1i(advectionProgram.uniforms.get('uVelocity'), velocity.read.attach(0));
     gl.uniform1i(advectionProgram.uniforms.get('uSource'), dye.read.attach(1));
-    gl.uniform1f(advectionProgram.uniforms.get('dissipation'), config.DENSITY_DISSIPATION);
+    gl.uniform1f(advectionProgram.uniforms.get('dissipation'), this.config.DENSITY_DISSIPATION);
     blit(dye.write);
     dye.swap();
   }
 
   private drawColor(target: any, color: any) {
     this.colorProgram.bind();
-    this.gl.uniform4f(this.colorProgram.uniforms.get('color'), color.r, color.g, color.b, 1);
+    this.gl.uniform4f(this.colorProgram.uniforms.get('color'), color.r, color.g, color.b, 0);
     this.blit(target);
   }
 
   private drawCheckerboard(target: any) {
     this.checkerboardProgram.bind();
-    this.gl.uniform1f(
-      this.checkerboardProgram.uniforms.get('aspectRatio'),
-      this.gl.canvas.width / this.gl.canvas.height
-    );
+    this.gl.uniform1f(this.checkerboardProgram.uniforms.get('aspectRatio'), this.gl.canvas.width / this.gl.canvas.height);
     this.blit(target);
   }
 
@@ -540,7 +483,7 @@ export class CanvasManager {
 
     displayMaterial.bind();
 
-    if (config.SHADING) {
+    if (this.config.SHADING) {
       const texelSize = displayMaterial.uniforms.get('texelSize');
       if (texelSize) {
         gl.uniform2f(texelSize, 1.0 / width, 1.0 / height);
@@ -557,20 +500,60 @@ export class CanvasManager {
 
   private render(target: any) {
     const gl = this.gl;
-    if (target == null || !config.TRANSPARENT) {
+    if (target == null || !this.config.TRANSPARENT) {
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.enable(gl.BLEND);
     } else {
       gl.disable(gl.BLEND);
     }
 
-    if (!config.TRANSPARENT) {
-      this.drawColor(target, normalizeColor(config.BACK_COLOR));
+    if (!this.config.TRANSPARENT) {
+      this.drawColor(target, normalizeColor(this.config.BACK_COLOR));
     }
-    if (target == null && config.TRANSPARENT) {
+    if (target == null && this.config.TRANSPARENT) {
       this.drawCheckerboard(target);
     }
     this.drawDisplay(target);
+  }
+
+  initShaders() {
+    this.baseVertexShader = compileShader(this.gl, this.gl.VERTEX_SHADER, baseVertexSource);
+    this.blurVertexShader = compileShader(this.gl, this.gl.VERTEX_SHADER, blurVertexSource);
+    this.blurShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, blurSource);
+    this.copyShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, copySource);
+    this.clearShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, clearSource);
+    this.colorShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, colorSource);
+    this.checkerboardShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, checkerboardSource);
+    this.splatShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, splatSource);
+    this.advectionShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, advectionSource);
+    this.divergenceShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, divergenceSource);
+    this.curlShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, curlSource);
+    this.vorticityShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, vorticitySource);
+    this.pressureShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, pressureSource);
+    this.gradientSubtractShader = compileShader(this.gl, this.gl.FRAGMENT_SHADER, gradientSubtractSource);
+  }
+
+  initPrograms() {
+    this.blurProgram = new Program(this.gl, this.blurVertexShader, this.blurShader);
+    this.copyProgram = new Program(this.gl, this.baseVertexShader, this.copyShader);
+    this.clearProgram = new Program(this.gl, this.baseVertexShader, this.clearShader);
+    this.colorProgram = new Program(this.gl, this.baseVertexShader, this.colorShader);
+    this.checkerboardProgram = new Program(this.gl, this.baseVertexShader, this.checkerboardShader);
+    this.splatProgram = new Program(this.gl, this.baseVertexShader, this.splatShader);
+    this.advectionProgram = new Program(this.gl, this.baseVertexShader, this.advectionShader);
+    this.divergenceProgram = new Program(this.gl, this.baseVertexShader, this.divergenceShader);
+    this.curlProgram = new Program(this.gl, this.baseVertexShader, this.curlShader);
+    this.vorticityProgram = new Program(this.gl, this.baseVertexShader, this.vorticityShader);
+    this.pressureProgram = new Program(this.gl, this.baseVertexShader, this.pressureShader);
+    this.gradientSubtractProgram = new Program(this.gl, this.baseVertexShader, this.gradientSubtractShader);
+  }
+
+  private updateKeywords() {
+    let displayKeywords = [];
+    if (this.config.SHADING) displayKeywords.push('SHADING');
+    if (this.config.BLOOM) displayKeywords.push('BLOOM');
+    if (this.config.SUNRAYS) displayKeywords.push('SUNRAYS');
+    this.displayMaterial.setKeywords(displayKeywords);
   }
 
   private drawScene() {
@@ -583,7 +566,7 @@ export class CanvasManager {
     }
     this.updateColors(dt);
     this.applyInputs();
-    if (!config.PAUSED) {
+    if (!this.config.PAUSED) {
       this.step(dt);
     }
     this.render(null);

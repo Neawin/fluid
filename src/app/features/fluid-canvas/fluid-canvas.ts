@@ -20,4 +20,8 @@ export class FluidCanvas {
     }
     this.cvsManager.init(canvas);
   }
+
+  restart() {
+    this.cvsManager.restart('ALICJA ŁATA');
+  }
 }

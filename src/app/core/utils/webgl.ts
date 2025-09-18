@@ -68,12 +68,7 @@ export function resizeCanvas(canvas: HTMLCanvasElement) {
   return false;
 }
 
-function getSupportedFormat(
-  gl: WebGL2RenderingContext,
-  internalFormat: number,
-  format: number,
-  type: number
-): WebGLTextureFormat | null {
+function getSupportedFormat(gl: WebGL2RenderingContext, internalFormat: number, format: number, type: number): WebGLTextureFormat | null {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
